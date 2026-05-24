@@ -522,18 +522,35 @@ def stage_r2_upload(content_id, item, emit_event):
     row.r2_video_url = r2_video_url
     db.session.commit()
 
+    # Did anything we expected to upload actually fail? Be honest about it —
+    # don't claim "permanent URLs" while the item still points at a temporary
+    # (expiring) source URL.
+    image_failed = bool(image_url and "placeholder" not in image_url and not r2_image_url)
+    video_failed = bool(video_url and "placeholder" not in video_url and not r2_video_url)
+
     detail = {
         "duration": duration,
         "r2_image_url": r2_image_url,
         "r2_video_url": r2_video_url,
+        "image_failed": image_failed,
+        "video_failed": video_failed,
         "cost": 0.0,
     }
 
-    emit_event(stage, "complete",
-               f"Assets uploaded to R2 in {duration}s. Your content now has permanent URLs that won't expire.",
-               detail)
-    _add_log(content_id, stage, "complete",
-             "Uploaded to R2", json.dumps(detail))
+    if image_failed or video_failed:
+        emit_event(stage, "complete",
+                   f"Finished in {duration}s, but some assets couldn't be copied to R2 — "
+                   f"they'll use the original source URLs, which can expire. "
+                   f"Check your R2 settings or re-run to make them permanent.",
+                   detail)
+        _add_log(content_id, stage, "warning",
+                 "R2 upload incomplete (some assets kept temporary URLs)", json.dumps(detail))
+    else:
+        emit_event(stage, "complete",
+                   f"Assets uploaded to R2 in {duration}s. Your content now has permanent URLs that won't expire.",
+                   detail)
+        _add_log(content_id, stage, "complete",
+                 "Uploaded to R2", json.dumps(detail))
 
     _record_stage_metric(content_id, stage, duration=duration, cost=0.0)
     return 0.0

@@ -138,6 +138,20 @@ def create_app():
     with app.app_context():
         db.create_all()
 
+        # API keys saved via the Settings page are stored in the DB. Without
+        # this, they were lost on every restart (launch.command) and every
+        # service silently fell back to "demo mode" even though the student
+        # had entered valid keys. Load them back into the environment so the
+        # service modules (which read os.getenv) pick them up.
+        try:
+            from models import Setting
+            for s in Setting.query.all():
+                if s.value:
+                    os.environ[s.key] = s.value
+                    app.config[s.key] = s.value
+        except Exception as e:  # never let settings load block startup
+            print(f"Could not load saved settings into environment: {e}")
+
         # Auto-seed if the database is empty (first run)
         from models import Contact
         if Contact.query.first() is None:

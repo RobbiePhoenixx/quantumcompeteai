@@ -2,6 +2,25 @@
 
 Complete guide to hooking up the OpenAI Realtime API for live voice conversations with a visual orb/bubble UI in a Flask dashboard. This is how Jarvis/Jackie's voice mode works — click the orb, talk, get instant spoken responses through WebSocket.
 
+> ⚠️ **GA UPDATE (this doc shows the retired Beta flow).** OpenAI moved the
+> Realtime API to GA and removed the Beta interface. The code below uses the
+> old `/v1/realtime/sessions` endpoint and `openai-beta.realtime-v1`
+> subprotocol, which now return *"The Realtime Beta API is no longer
+> supported."* The implementation in this app has been migrated to GA. Use
+> these mappings, not the snippets below:
+>
+> | Beta (this doc) | GA (use this) |
+> |---|---|
+> | `POST /v1/realtime/sessions` | `POST /v1/realtime/client_secrets` |
+> | flat body `{model, voice, instructions, input_audio_transcription, turn_detection}` | wrapped `{ "session": { "type": "realtime", "model", "instructions", "audio": { "input": { "transcription", "turn_detection" }, "output": { "voice" } } } }` |
+> | response `client_secret.value` | response top-level `value` |
+> | WS subprotocols incl. `openai-beta.realtime-v1` | drop it: `['realtime', 'openai-insecure-api-key.'+token]` |
+> | model `gpt-4o-mini-realtime-preview` | `gpt-realtime` |
+> | `response.audio.delta` / `response.audio_transcript.delta` | `response.output_audio.delta` / `response.output_audio_transcript.delta` |
+> | no `OpenAI-Beta` header | (still none — never send it) |
+>
+> Source of truth: the live code in `blueprints/jackie.py` + `templates/admin/jackie.html`.
+
 ---
 
 ## Architecture Overview

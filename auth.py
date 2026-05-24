@@ -6,7 +6,7 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get("logged_in"):
-            if request.is_json or request.path.startswith("/api/"):
+            if request.is_json or request.path.startswith("/api/") or request.path.startswith("/content/api/"):
                 from flask import jsonify
                 return jsonify({"error": "Authentication required"}), 401
             return redirect(url_for("admin.login", next=request.url))

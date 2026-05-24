@@ -1,7 +1,8 @@
 """
 services/kie_ai.py — Image + Video Generation via Kie.ai
 ==========================================================
-Image: Nano Banana Pro — fast AI image generation
+Image: GPT Image-2 — realistic AI image generation (text-to-image and
+       image-to-image, the latter places your headshot into the photo)
 Video: Veo 3.1 — AI video generation (longer processing)
 
 Students learn: async/polling APIs. These APIs don't return results instantly.
@@ -16,6 +17,7 @@ Polling strategy:
     On timeout: return gracefully with timed_out=True (no exception)
 """
 
+import json
 import os
 import re
 import time
@@ -28,7 +30,12 @@ KIE_BASE_URL = "https://api.kie.ai/api/v1"
 TASK_CREATE_URL = f"{KIE_BASE_URL}/jobs/createTask"
 TASK_STATUS_URL = f"{KIE_BASE_URL}/jobs/recordInfo"
 VIDEO_CREATE_URL = f"{KIE_BASE_URL}/veo/generate"
-VIDEO_STATUS_URL = f"{KIE_BASE_URL}/veo/get-1080p-video"
+# Status/result endpoint. Use /veo/record-info — it returns the real successFlag
+# (1=success, 2/3=failed), the result URLs, and errorMessage. The old
+# /veo/get-1080p-video is only for fetching a 1080p render and returns data:null
+# for 720p jobs, which made polling read "processing" forever and never notice a
+# failure or completion.
+VIDEO_STATUS_URL = f"{KIE_BASE_URL}/veo/record-info"
 
 
 def _clean_prompt(prompt):
@@ -47,9 +54,16 @@ def _clean_prompt(prompt):
 
 def _get_headers():
     """Build auth headers for Kie.ai API."""
+    # Students set KIE_AI_API_KEY (matches .env.example + the Settings page).
+    # KIE_API_KEY is kept as a legacy fallback so older .env files still work.
     api_key = os.getenv("KIE_AI_API_KEY") or os.getenv("KIE_API_KEY")
     if not api_key:
         return None
+    # Tolerate a pasted "Bearer <key>" (a very common mistake) — otherwise the
+    # header becomes "Bearer Bearer <key>" and Kie rejects every request.
+    api_key = api_key.strip()
+    if api_key.lower().startswith("bearer "):
+        api_key = api_key[7:].strip()
     return {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -57,11 +71,12 @@ def _get_headers():
 
 
 # ---------------------------------------------------------------------------
-# generate_image() — Create an image with Nano Banana Pro
+# generate_image() — Create an image with GPT Image-2
 # ---------------------------------------------------------------------------
 def generate_image(prompt, emit_event=None, reference_image_url=None):
     """
-    Generate an image using Kie.ai's Nano Banana Pro model.
+    Generate an image using Kie.ai's GPT Image-2 model (text-to-image, or
+    image-to-image when a reference photo is supplied).
 
     This is an ASYNC API pattern:
     1. POST to create a task → get a task_id
@@ -92,27 +107,49 @@ def generate_image(prompt, emit_event=None, reference_image_url=None):
             "demo": True
         }
 
-    # -- Step 1: Create the task --
-    if reference_image_url:
-        emit("image", "progress", "Sending image description + headshot reference to Kie.ai. The AI will generate an image featuring the person from the headshot.")
-        prompt = f"This exact person from the reference photo, {prompt}"
-    else:
-        emit("image", "progress", "Sending the image description to Kie.ai. Unlike the text AI (which responds instantly), image AI takes time — so we create a 'task' and check back on it.")
+    # Force photorealism. GPT Image-2 will happily produce surreal AI-art
+    # unless told otherwise — this keeps generated images grounded and
+    # believable, matching whatever the article is actually about.
+    realism = (
+        " — Ultra-realistic editorial photograph, shot on a full-frame camera "
+        "with a 50mm lens, natural lighting, true-to-life colors and textures, "
+        "an authentic real-world setting relevant to the topic. Photojournalistic "
+        "and believable: not surreal, not an illustration, not a 3D render, no "
+        "distorted anatomy, no text, logos, or watermarks."
+    )
+    prompt = f"{prompt}{realism}"
 
-    try:
+    # -- Step 1: Create the task --
+    # GPT Image-2 has two models: text-to-image, and image-to-image which
+    # takes the headshot so the brand character actually appears in the photo.
+    # image-to-image REQUIRES input_urls — only take that branch when we truly
+    # have a source image, otherwise Kie rejects the request (422). A blank /
+    # whitespace reference falls back to text-to-image.
+    if reference_image_url and reference_image_url.strip():
+        emit("image", "progress", "Sending the image description + your headshot to GPT Image-2 (image-to-image). The AI will place the person from your headshot into a realistic photo.")
+        prompt = f"This exact person from the reference photo. {prompt}"
+        model = "gpt-image-2-image-to-image"
+        input_payload = {
+            "prompt": prompt,
+            "input_urls": [reference_image_url],
+            "aspect_ratio": "9:16",
+            "resolution": "1K",
+        }
+    else:
+        emit("image", "progress", "Sending the image description to GPT Image-2 (text-to-image). Unlike the text AI (which responds instantly), image AI takes time — so we create a 'task' and check back on it.")
+        model = "gpt-image-2-text-to-image"
         input_payload = {
             "prompt": prompt,
             "aspect_ratio": "9:16",
-            "resolution": "1K"
+            "resolution": "1K",
         }
-        if reference_image_url:
-            input_payload["image_input"] = [reference_image_url]
 
+    try:
         create_response = requests.post(
             TASK_CREATE_URL,
             headers=headers,
             json={
-                "model": "nano-banana-pro",
+                "model": model,
                 "input": input_payload
             },
             timeout=30
@@ -172,7 +209,6 @@ def generate_image(prompt, emit_event=None, reference_image_url=None):
                 image_url = ""
                 result_json_str = data.get("resultJson", "")
                 if result_json_str:
-                    import json
                     result_json = json.loads(result_json_str)
                     result_urls = result_json.get("resultUrls", [])
                     if result_urls:
@@ -206,6 +242,120 @@ def generate_image(prompt, emit_event=None, reference_image_url=None):
         except requests.exceptions.RequestException as e:
             emit("image", "progress", f"Poll request failed (attempt {attempt}), retrying...")
             # Don't raise — just retry on the next poll cycle
+
+
+# ---------------------------------------------------------------------------
+# _poll_veo_task() — Shared two-phase polling helper for all Veo functions
+# ---------------------------------------------------------------------------
+def _poll_veo_task(task_id, headers, emit, cost, done_message=None):
+    """Two-Phase Patient Polling for Veo video generation tasks.
+
+    Phase 1: poll every 30s for first 5 minutes (300s)
+    Phase 2: poll every 60s for up to 10 more minutes
+    Total max: 15 minutes (900s)
+    On timeout: returns gracefully with timed_out=True (no exception raised)
+
+    Args:
+        done_message: Optional format string emitted on success. Use {duration}
+                      as a placeholder for elapsed seconds. When None, a generic
+                      message is emitted.
+    """
+    PHASE_1_INTERVAL = 30   # seconds between polls in phase 1
+    PHASE_1_DURATION = 300  # phase 1 lasts 5 minutes
+    PHASE_2_INTERVAL = 60   # seconds between polls in phase 2
+    MAX_POLL_TIME = 900      # total max: 15 minutes
+
+    elapsed = 0
+    attempt = 0
+
+    while elapsed < MAX_POLL_TIME:
+        interval = PHASE_1_INTERVAL if elapsed < PHASE_1_DURATION else PHASE_2_INTERVAL
+        time.sleep(interval)
+        elapsed += interval
+        attempt += 1
+
+        phase_label = "Phase 1" if elapsed < PHASE_1_DURATION else "Phase 2 (patient)"
+        if emit:
+            emit("video", "polling", f"{phase_label} - Attempt #{attempt}... checking status ({elapsed}s elapsed)")
+
+        try:
+            status_response = requests.get(
+                VIDEO_STATUS_URL,
+                headers=headers,
+                params={"taskId": task_id},
+                timeout=15
+            )
+            status_response.raise_for_status()
+            status_data = status_response.json()
+
+            # Veo uses data.successFlag: 0=generating, 1=success, 2/3=failed
+            data = status_data.get("data") or status_data
+            success_flag = data.get("successFlag", 0) if isinstance(data, dict) else 0
+            state = data.get("state", "unknown") if isinstance(data, dict) else "unknown"
+            if success_flag == 1:
+                state = "success"
+            elif success_flag in (2, 3):
+                state = "failed"
+            elif success_flag == 0 and state == "unknown":
+                state = "processing"
+
+            # -- Emit detailed polling status --
+            emit("video", "polling",
+                 f"{phase_label} - Attempt #{attempt} — status: \"{state}\" ({elapsed}s so far). Videos can take 1-15 minutes.",
+                 {"attempt": attempt, "state": state, "elapsed": elapsed})
+
+            if state in ("success", "completed", "done"):
+                # Extract video URL — Veo returns in data.response.resultUrls[]
+                video_url = ""
+                if data.get("response") and data["response"].get("resultUrls"):
+                    video_url = data["response"]["resultUrls"][0]
+                elif data.get("videoUrl"):
+                    video_url = data["videoUrl"]
+                # Fallback: try resultJson like images
+                if not video_url:
+                    result_json_str = data.get("resultJson", "")
+                    if result_json_str:
+                        result_json = json.loads(result_json_str)
+                        result_urls = result_json.get("resultUrls", [])
+                        if result_urls:
+                            video_url = result_urls[0]
+
+                duration = elapsed
+
+                if done_message is not None:
+                    success_msg = done_message.format(duration=duration)
+                else:
+                    success_msg = f"Video is done! Took {duration}s — much longer than the image, right? That's normal. Downloading now..."
+                emit("video", "progress", success_msg)
+
+                return {
+                    "video_url": video_url,
+                    "task_id": task_id,
+                    "duration": duration,
+                    "cost": cost,
+                    "demo": False
+                }
+
+            elif state in ("failed", "failure", "error", "cancelled"):
+                error_msg = data.get("errorMessage") or data.get("errorMsg") or data.get("failMsg", "Unknown error")
+                emit("video", "error", f"Video generation failed: {error_msg}")
+                raise Exception(f"Video generation failed: {error_msg}")
+
+            # Otherwise keep polling (state is 'processing', 'pending', etc.)
+
+        except requests.exceptions.RequestException as e:
+            emit("video", "progress", f"Poll request failed (attempt {attempt}), retrying...")
+
+    # -- Timeout: return gracefully, don't raise --
+    emit("video", "progress",
+         "Video generation timed out after 15 minutes. Kie.ai may still be processing in the background.")
+    return {
+        "video_url": None,
+        "timed_out": True,
+        "message": "Video generation timed out after 15 minutes. Kie.ai may still be processing - check back later.",
+        "task_id": task_id,
+        "cost": cost,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -272,102 +422,10 @@ def generate_video(prompt, emit_event=None):
         emit("video", "error", f"Failed to create video task: {str(e)}")
         raise
 
-    # -- Step 2: Two-Phase Patient Polling --
-    PHASE_1_INTERVAL = 30   # seconds between polls in phase 1
-    PHASE_1_DURATION = 300  # phase 1 lasts 5 minutes
-    PHASE_2_INTERVAL = 60   # seconds between polls in phase 2
-    MAX_POLL_TIME = 900      # total max: 15 minutes
-
-    cost = 0.19  # Approximate cost per video
-    elapsed = 0
-    attempt = 0
-
-    while elapsed < MAX_POLL_TIME:
-        interval = PHASE_1_INTERVAL if elapsed < PHASE_1_DURATION else PHASE_2_INTERVAL
-        time.sleep(interval)
-        elapsed += interval
-        attempt += 1
-
-        phase_label = "Phase 1" if elapsed < PHASE_1_DURATION else "Phase 2 (patient)"
-        if emit:
-            emit("video", "polling", f"{phase_label} - Attempt #{attempt}... checking status ({elapsed}s elapsed)")
-
-        try:
-            status_response = requests.get(
-                VIDEO_STATUS_URL,
-                headers=headers,
-                params={"taskId": task_id},
-                timeout=15
-            )
-            status_response.raise_for_status()
-            status_data = status_response.json()
-
-            # Veo uses data.successFlag: 0=generating, 1=success, 2/3=failed
-            data = status_data.get("data") or status_data
-            success_flag = data.get("successFlag", 0) if isinstance(data, dict) else 0
-            state = data.get("state", "unknown") if isinstance(data, dict) else "unknown"
-            if success_flag == 1:
-                state = "success"
-            elif success_flag in (2, 3):
-                state = "failed"
-            elif success_flag == 0 and state == "unknown":
-                state = "processing"
-
-            # -- Emit detailed polling status --
-            emit("video", "polling",
-                 f"{phase_label} - Attempt #{attempt} — status: \"{state}\" ({elapsed}s so far). Videos can take 1-15 minutes.",
-                 {"attempt": attempt, "state": state, "elapsed": elapsed})
-
-            if state in ("success", "completed", "done"):
-                # Extract video URL — Veo returns in data.response.resultUrls[]
-                video_url = ""
-                if data.get("response") and data["response"].get("resultUrls"):
-                    video_url = data["response"]["resultUrls"][0]
-                elif data.get("videoUrl"):
-                    video_url = data["videoUrl"]
-                # Fallback: try resultJson like images
-                if not video_url:
-                    import json
-                    result_json_str = data.get("resultJson", "")
-                    if result_json_str:
-                        result_json = json.loads(result_json_str)
-                        result_urls = result_json.get("resultUrls", [])
-                        if result_urls:
-                            video_url = result_urls[0]
-
-                duration = elapsed
-
-                emit("video", "progress",
-                     f"Video is done! Took {duration}s — much longer than the image, right? That's normal. Downloading now...")
-
-                return {
-                    "video_url": video_url,
-                    "task_id": task_id,
-                    "duration": duration,
-                    "cost": cost,
-                    "demo": False
-                }
-
-            elif state in ("failed", "failure", "error", "cancelled"):
-                error_msg = data.get("errorMessage") or data.get("errorMsg") or data.get("failMsg", "Unknown error")
-                emit("video", "error", f"Video generation failed: {error_msg}")
-                raise Exception(f"Video generation failed: {error_msg}")
-
-            # Otherwise keep polling (state is 'processing', 'pending', etc.)
-
-        except requests.exceptions.RequestException as e:
-            emit("video", "progress", f"Poll request failed (attempt {attempt}), retrying...")
-
-    # -- Timeout: return gracefully, don't raise --
-    emit("video", "progress",
-         "Video generation timed out after 15 minutes. Kie.ai may still be processing in the background.")
-    return {
-        "video_url": None,
-        "timed_out": True,
-        "message": "Video generation timed out after 15 minutes. Kie.ai may still be processing - check back later.",
-        "task_id": task_id,
-        "cost": cost,
-    }
+    return _poll_veo_task(
+        task_id, headers, emit, cost=0.19,
+        done_message="Video is done! Took {duration}s — much longer than the image, right? That's normal. Downloading now...",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -412,9 +470,11 @@ def generate_video_with_reference(prompt, reference_image_url, emit_event=None):
             headers=headers,
             json={
                 "prompt": prompt,
-                "aspect_ratio": "9:16",
                 "model": "veo3_fast",
-                "reference_images": [reference_image_url]
+                "aspect_ratio": "9:16",
+                "generationType": "REFERENCE_2_VIDEO",  # Veo reference-to-video mode
+                "generateAudio": False,                  # bypass Kie audio safety filter
+                "imageUrls": [reference_image_url],       # correct key (was reference_images)
             },
             timeout=30
         )
@@ -432,93 +492,63 @@ def generate_video_with_reference(prompt, reference_image_url, emit_event=None):
         emit("video", "error", f"Failed to create video task: {str(e)}")
         raise
 
-    # -- Step 2: Two-Phase Patient Polling --
-    PHASE_1_INTERVAL = 30   # seconds between polls in phase 1
-    PHASE_1_DURATION = 300  # phase 1 lasts 5 minutes
-    PHASE_2_INTERVAL = 60   # seconds between polls in phase 2
-    MAX_POLL_TIME = 900      # total max: 15 minutes
+    return _poll_veo_task(
+        task_id, headers, emit, cost=0.30,
+        done_message="Headshot video is done! Took {duration}s. Downloading now...",
+    )
 
-    cost = 0.30  # Higher cost for reference video
-    elapsed = 0
-    attempt = 0
 
-    while elapsed < MAX_POLL_TIME:
-        interval = PHASE_1_INTERVAL if elapsed < PHASE_1_DURATION else PHASE_2_INTERVAL
-        time.sleep(interval)
-        elapsed += interval
-        attempt += 1
+# ---------------------------------------------------------------------------
+# generate_video_from_image() — Animate a static image into a video clip
+# ---------------------------------------------------------------------------
+def generate_video_from_image(image_url, prompt, emit_event=None):
+    """Animate a static image into an 8s clip via Veo 3.1 (image-to-video).
 
-        phase_label = "Phase 1" if elapsed < PHASE_1_DURATION else "Phase 2 (patient)"
-        if emit:
-            emit("video", "polling", f"{phase_label} - Attempt #{attempt}... checking status ({elapsed}s elapsed)")
+    Used by the Avatar page: the image already contains the student's face
+    (placed there by GPT Image-2), so animating it keeps the still and the
+    clip the same scene.
+    """
+    emit = emit_event or (lambda *a, **kw: None)
+    prompt = _clean_prompt(prompt or "Subtle, natural movement. Camera slowly pushes in.")
+    headers = _get_headers()
 
-        try:
-            status_response = requests.get(
-                VIDEO_STATUS_URL,
-                headers=headers,
-                params={"taskId": task_id},
-                timeout=15
-            )
-            status_response.raise_for_status()
-            status_data = status_response.json()
+    if not headers:
+        emit("video", "progress", "No Kie.ai API key set yet — showing a placeholder. Add your key in Settings > Kie.ai.")
+        return {
+            "video_url": "https://placehold.co/1080x1920/17181C/C7A35A?text=Add+Kie.ai+Key+in+Settings",
+            "task_id": "demo_video_i2v_task",
+            "duration": 0,
+            "cost": 0.0,
+            "demo": True,
+        }
 
-            data = status_data.get("data") or status_data
-            success_flag = data.get("successFlag", 0) if isinstance(data, dict) else 0
-            state = data.get("state", "unknown") if isinstance(data, dict) else "unknown"
-            if success_flag == 1:
-                state = "success"
-            elif success_flag in (2, 3):
-                state = "failed"
-            elif success_flag == 0 and state == "unknown":
-                state = "processing"
+    emit("video", "progress", "Animating your photo into an 8-second clip with Veo 3.1 (image-to-video). This takes a few minutes.")
+    try:
+        create_response = requests.post(
+            VIDEO_CREATE_URL,
+            headers=headers,
+            json={
+                "prompt": prompt,
+                "model": "veo3_fast",
+                "aspect_ratio": "9:16",
+                "generationType": "IMAGE_2_VIDEO",  # Veo image-to-video mode
+                "generateAudio": False,             # bypass Kie audio safety filter
+                "images": [image_url],              # i2v uses "images" (ref uses "imageUrls")
+            },
+            timeout=30
+        )
+        create_response.raise_for_status()
+        create_data = create_response.json()
+        data = create_data.get("data") or create_data
+        task_id = data.get("taskId") or data.get("task_id") or create_data.get("taskId")
+        if not task_id:
+            raise Exception(f"No task_id in response: {create_data}")
+        emit("video", "progress", f"Video task created! ID: {task_id}. Polling for the result...")
+    except requests.exceptions.RequestException as e:
+        emit("video", "error", f"Failed to create video task: {str(e)}")
+        raise
 
-            emit("video", "polling",
-                 f"{phase_label} - Attempt #{attempt} — status: \"{state}\" ({elapsed}s so far). Videos can take 1-15 minutes.",
-                 {"attempt": attempt, "state": state, "elapsed": elapsed})
-
-            if state in ("success", "completed", "done"):
-                video_url = ""
-                if data.get("response") and data["response"].get("resultUrls"):
-                    video_url = data["response"]["resultUrls"][0]
-                elif data.get("videoUrl"):
-                    video_url = data["videoUrl"]
-                if not video_url:
-                    import json
-                    result_json_str = data.get("resultJson", "")
-                    if result_json_str:
-                        result_json = json.loads(result_json_str)
-                        result_urls = result_json.get("resultUrls", [])
-                        if result_urls:
-                            video_url = result_urls[0]
-
-                duration = elapsed
-
-                emit("video", "progress",
-                     f"Headshot video is done! Took {duration}s. Downloading now...")
-
-                return {
-                    "video_url": video_url,
-                    "task_id": task_id,
-                    "duration": duration,
-                    "cost": cost,
-                    "demo": False
-                }
-
-            elif state in ("failed", "failure", "error", "cancelled"):
-                error_msg = data.get("errorMessage") or data.get("errorMsg") or data.get("failMsg", "Unknown error")
-                emit("video", "error", f"Video generation failed: {error_msg}")
-                raise Exception(f"Video generation failed: {error_msg}")
-
-        except requests.exceptions.RequestException as e:
-            emit("video", "progress", f"Poll request failed (attempt {attempt}), retrying...")
-
-    # -- Timeout: return gracefully, don't raise --
-    emit("video", "progress",
-         "Reference video generation timed out after 15 minutes. Kie.ai may still be processing in the background.")
-    return {
-        "video_url": None,
-        "timed_out": True,
-        "message": "Video generation timed out after 15 minutes. Kie.ai may still be processing - check back later.",
-        "task_id": task_id,
-        "cost": cost,
-    }
+    return _poll_veo_task(
+        task_id, headers, emit, cost=0.30,
+        done_message="Your clip is done! Took {duration}s. Downloading now...",
+    )

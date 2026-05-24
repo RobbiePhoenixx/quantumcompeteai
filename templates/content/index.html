@@ -66,17 +66,29 @@
     {% if items|length > 0 %}
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
         {% for item in items %}
-        <a href="/content/{{ item.id }}"
-           class="card"
-           style="display: block; text-decoration: none; overflow: hidden; transition: border-color 0.2s;"
+        {# An item is "processing" while it's anywhere mid-pipeline (not in a
+           terminal state). Processing cards are NOT clickable — there's nothing
+           to view yet — and the page auto-refreshes them as they finish. #}
+        {% set is_processing = item.status not in ['ready', 'complete', 'published', 'error', 'failed', 'draft'] %}
+        <a {% if not is_processing %}href="/content/{{ item.id }}"{% endif %}
+           class="card content-card{% if is_processing %} is-processing{% endif %}"
+           data-id="{{ item.id }}"
+           data-status="{{ item.status }}"
+           style="display: block; text-decoration: none; overflow: hidden; transition: border-color 0.2s;{% if is_processing %} cursor: progress;{% endif %}"
            x-show="filterMatch('{{ item.status }}')"
            x-transition>
             <!-- Thumbnail -->
-            <div style="height: 160px; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 1px solid var(--border-light);">
+            <div style="position: relative; height: 160px; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 1px solid var(--border-light);">
                 {% if item.r2_image_url or item.image_url %}
                 <img src="{{ item.r2_image_url or item.image_url }}" alt="Content thumbnail" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">
                 {% else %}
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-subtle)" stroke-width="1.5" style="opacity: 0.3;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                {% endif %}
+                {% if is_processing %}
+                <div style="position: absolute; inset: 0; background: rgba(15,16,20,0.55); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;">
+                    <span class="spinner"></span>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">Processing…</span>
+                </div>
                 {% endif %}
             </div>
             <!-- Body -->
@@ -91,8 +103,10 @@
                             {{ (item.platform or 'instagram')|capitalize }}
                         </span>
                         <!-- Status Badge -->
-                        {% if item.status in ['processing', 'scraping', 'scripting', 'imaging', 'videoing'] %}
-                        <span class="badge" style="background: rgba(245,158,11,0.15); color: var(--warning); font-size: 0.7rem;">Processing</span>
+                        {% if is_processing %}
+                        <span class="badge" style="background: rgba(245,158,11,0.15); color: var(--warning); font-size: 0.7rem; display: inline-flex; align-items: center; gap: 5px;">
+                            <span class="spinner spinner-sm" style="width: 10px; height: 10px;"></span>Processing
+                        </span>
                         {% elif item.status == 'ready' or item.status == 'complete' %}
                         <span class="badge" style="background: var(--gold-tint); color: var(--gold); font-size: 0.7rem;">Ready</span>
                         {% elif item.status == 'published' %}
@@ -148,7 +162,15 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 <script>
-// Fire confetti if redirected after content creation
+// Just submitted a piece on the Create screen → let the user know it's cooking.
+if (window.location.search.includes('queued=1')) {
+    window.history.replaceState({}, '', '/content');
+    setTimeout(function() {
+        if (window.showToast) showToast('Generating in the background — it will appear here when ready.', 'success');
+    }, 400);
+}
+
+// A processing item just finished → celebrate.
 if (window.location.search.includes('celebrate=1')) {
     window.history.replaceState({}, '', '/content');
     setTimeout(function() {
@@ -157,9 +179,45 @@ if (window.location.search.includes('celebrate=1')) {
             confetti({ particleCount: 80, spread: 100, origin: { y: 0.5, x: 0.3 }, colors: ['#FFD700', '#FFA500'] });
             confetti({ particleCount: 80, spread: 100, origin: { y: 0.5, x: 0.7 }, colors: ['#C7A35A', '#22c55e'] });
         }, 300);
-        if (window.showToast) showToast('Content created successfully!', 'success');
+        if (window.showToast) showToast('Content ready! 🎉', 'success');
     }, 500);
 }
+
+// Live-refresh: while any card is still processing, poll the items API and
+// reload the page the moment one reaches a terminal state, so "Processing"
+// flips to "Ready" (clickable) on its own — no manual refresh needed.
+(function () {
+    const processingCards = Array.from(document.querySelectorAll('.content-card.is-processing'));
+    if (processingCards.length === 0) return;
+
+    const watching = processingCards.map(function (c) { return c.dataset.id; });
+    const TERMINAL = ['ready', 'complete', 'published', 'error', 'failed'];
+    const DONE_OK = ['ready', 'complete', 'published'];
+
+    const poll = setInterval(async function () {
+        try {
+            const resp = await fetch('/content/api/items');
+            if (!resp.ok) return;
+            const items = await resp.json();
+            const byId = {};
+            items.forEach(function (it) { byId[it.id] = it.status; });
+
+            let finishedAny = false, finishedOk = false;
+            watching.forEach(function (id) {
+                const now = byId[id];
+                if (now && TERMINAL.indexOf(now) !== -1) {
+                    finishedAny = true;
+                    if (DONE_OK.indexOf(now) !== -1) finishedOk = true;
+                }
+            });
+
+            if (finishedAny) {
+                clearInterval(poll);
+                window.location.href = finishedOk ? '/content?celebrate=1' : '/content';
+            }
+        } catch (e) { /* transient — keep polling */ }
+    }, 4000);
+})();
 
 function contentLibrary() {
     return {
@@ -167,7 +225,8 @@ function contentLibrary() {
         filterMatch(status) {
             if (this.filter === 'all') return true;
             if (this.filter === 'processing') {
-                return ['processing', 'scraping', 'scripting', 'imaging', 'videoing'].includes(status);
+                // Anything mid-pipeline (not a terminal state, not an untouched draft).
+                return !['ready', 'complete', 'published', 'error', 'failed', 'draft'].includes(status);
             }
             if (this.filter === 'ready') {
                 return ['ready', 'complete'].includes(status);

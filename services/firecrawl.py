@@ -55,8 +55,21 @@ def scrape_url(url, emit_event=None):
 
         emit("scrape", "progress", "FireCrawl is reading the webpage now... (this usually takes 1-3 seconds)")
 
-        # firecrawl-py v4+ uses scrape() with keyword args directly
-        result = fc.scrape(url, formats=["markdown"])
+        # The FireCrawl SDK signature changed across major versions:
+        #   v2+ (incl. 4.x): fc.scrape(url, formats=["markdown"]) -> Document
+        #   v1.x:            fc.scrape_url(url, params={"formats": [...]}) -> dict
+        # Prefer the modern method. The old `params=` kwarg on the new SDK is
+        # exactly what caused the "scrape() got an unexpected keyword argument
+        # 'params'" error — so never pass it to the modern call.
+        if hasattr(fc, "scrape"):
+            result = fc.scrape(url, formats=["markdown"])
+        elif hasattr(fc, "scrape_url"):
+            try:
+                result = fc.scrape_url(url, formats=["markdown"])
+            except TypeError:
+                result = fc.scrape_url(url, params={"formats": ["markdown"]})
+        else:
+            raise Exception("Installed firecrawl-py exposes neither scrape() nor scrape_url()")
 
         # v1 returns dict, v4 returns Document object — handle both
         if isinstance(result, dict):

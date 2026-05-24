@@ -44,6 +44,14 @@ def create():
     return render_template("content/create.html", headshot_url=headshot_url, api_status=api_status)
 
 
+@content_bp.route("/avatar")
+@login_required
+def avatar():
+    """Baby one-off: upload a photo -> image + 8s video of you in the scene."""
+    from services.r2_storage import is_configured as r2_is_configured
+    return render_template("content/avatar.html", r2_ready=r2_is_configured())
+
+
 @content_bp.route("/<int:item_id>")
 @login_required
 def detail(item_id):

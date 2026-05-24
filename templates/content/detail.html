@@ -12,9 +12,19 @@
 
 {% block page_actions %}
 <div class="flex items-center gap-2">
-    <button class="btn btn-primary btn-sm" @click="publishNow()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        Publish Now
+    <button class="btn btn-primary btn-sm" @click="publishNow()" :disabled="publishing">
+        <template x-if="!publishing">
+            <span class="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                Publish Now
+            </span>
+        </template>
+        <template x-if="publishing">
+            <span class="flex items-center gap-2">
+                <span class="spinner spinner-sm"></span>
+                Publishing…
+            </span>
+        </template>
     </button>
     <button class="btn btn-danger btn-sm" @click="confirmDelete = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -25,6 +35,25 @@
 
 {% block content %}
 <div x-data="contentDetail()">
+
+    <!-- Real-time publish status (processing → posted / not posted) -->
+    <div x-show="publishState" x-transition x-cloak style="margin-bottom: 16px;">
+        <div x-show="publishState === 'processing'"
+             style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 10px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);">
+            <span class="spinner spinner-sm"></span>
+            <span style="font-size: 0.88rem; color: var(--warning);" x-text="publishMsg"></span>
+        </div>
+        <div x-show="publishState === 'success'"
+             style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 10px; background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.25);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span style="font-size: 0.88rem; color: var(--success);" x-text="publishMsg"></span>
+        </div>
+        <div x-show="publishState === 'error'"
+             style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 10px; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span style="font-size: 0.88rem; color: var(--danger);" x-text="publishMsg"></span>
+        </div>
+    </div>
 
     <!-- Status Bar -->
     <div class="flex items-center gap-3" style="margin-bottom: 24px;">
@@ -377,6 +406,9 @@ function contentDetail() {
     return {
         script: {{ item.script|tojson if item.script else '""' }},
         confirmDelete: false,
+        publishing: false,
+        publishState: '',   // '' | 'processing' | 'success' | 'error'
+        publishMsg: '',
 
         copyText(text) {
             navigator.clipboard.writeText(text).then(() => {
@@ -385,11 +417,47 @@ function contentDetail() {
         },
 
         publishNow() {
-            showToast('Publishing... (connect social accounts in Settings)', 'warning');
+            if (this.publishing) return;
+            const platform = '{{ (item.platform or "social")|capitalize }}';
+            this.publishing = true;
+            this.publishState = 'processing';
+            this.publishMsg = 'Sending your post to ' + platform + '…';
+            showToast('Publishing to ' + platform + '…', 'warning');
+
+            fetch('/content/api/{{ item.id }}/publish', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    this.publishing = false;
+                    if (data.error) {
+                        this.publishState = 'error';
+                        this.publishMsg = 'Not posted: ' + data.error;
+                        showToast('Could not publish: ' + data.error, 'error');
+                        return;
+                    }
+                    if (data.demo) {
+                        this.publishState = 'error';
+                        this.publishMsg = data.message || 'Demo mode — add your publishing key in Settings to post for real.';
+                        showToast(this.publishMsg, 'warning');
+                        return;
+                    }
+                    const where = (data.platforms_published && data.platforms_published.length)
+                        ? data.platforms_published.join(', ') : 'your channels';
+                    this.publishState = 'success';
+                    this.publishMsg = 'Posted to ' + where + '! Refreshing…';
+                    showToast('Published to ' + where + '! 🎉', 'success');
+                    // Reload so the status flips to "Published".
+                    setTimeout(() => window.location.reload(), 1300);
+                })
+                .catch(() => {
+                    this.publishing = false;
+                    this.publishState = 'error';
+                    this.publishMsg = 'Not posted — could not reach the server. Try again.';
+                    showToast('Failed to publish — check your connection and try again.', 'error');
+                });
         },
 
         deleteItem() {
-            fetch('/content/api/item/{{ item.id }}', { method: 'DELETE' })
+            fetch('/content/api/{{ item.id }}', { method: 'DELETE' })
                 .then(r => r.json())
                 .then(data => {
                     showToast('Content deleted', 'success');

@@ -1,0 +1,364 @@
+{% extends "base_admin.html" %}
+
+{% block page_title %}Avatar Generator{% endblock %}
+{% block page_subtitle %}
+<div class="page-header breadcrumb" style="margin-bottom: 0;">
+    <a href="/content" style="color: var(--text-subtle); font-size: 0.875rem;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 4px;"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to Content Library
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div x-data="avatarApp()">
+
+    <div style="display: grid; grid-template-columns: 1fr; gap: 24px; max-width: 800px;">
+
+        <!-- Page heading -->
+        <div>
+            <h2 style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin: 0 0 6px;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 8px;"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+                Avatar Generator
+            </h2>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
+                Upload your photo, describe the scene, and get a picture + an 8-second video of you in it.
+            </p>
+        </div>
+
+        {% if not r2_ready %}
+        <!-- R2 Not Configured Warning -->
+        <div style="background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+                <div style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Cloudflare R2 storage required</div>
+                <div style="font-size: 0.82rem; color: var(--text-tertiary); line-height: 1.5; margin-bottom: 8px;">
+                    The Avatar Generator needs R2 to host your photo at a URL the AI can access.
+                    Add your <strong>R2_ACCOUNT_ID</strong>, <strong>R2_ACCESS_KEY_ID</strong>, <strong>R2_SECRET_ACCESS_KEY</strong>,
+                    and <strong>R2_BUCKET_NAME</strong> in Settings to enable this feature.
+                </div>
+                <a href="/admin/settings" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; color: var(--gold); text-decoration: none; font-weight: 600;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06"/></svg>
+                    Configure in Settings
+                </a>
+            </div>
+        </div>
+
+        <!-- Disabled form (shown greyed out to communicate what the form looks like) -->
+        <div class="card" style="opacity: 0.45; pointer-events: none; user-select: none;">
+        {% else %}
+        <!-- Active form card -->
+        <div class="card">
+        {% endif %}
+
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Your Photo &amp; Scene
+                </h3>
+            </div>
+            <div class="card-body">
+
+                <!-- Photo upload with thumbnail preview -->
+                <div class="form-group">
+                    <label class="form-label">Your Photo</label>
+                    <div style="display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+                        <div style="position: relative;">
+                            <div x-show="!photoPreview"
+                                 style="width: 96px; height: 96px; border-radius: 10px; border: 2px dashed var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; background: var(--bg-card-inner, rgba(255,255,255,0.03));"
+                                 @click="$refs.photoInput.click()">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-subtle)" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                <span style="font-size: 0.7rem; color: var(--text-subtle); text-align: center; line-height: 1.3;">Click to<br>upload</span>
+                            </div>
+                            <div x-show="photoPreview" x-transition style="position: relative; cursor: pointer;" @click="$refs.photoInput.click()">
+                                <img :src="photoPreview"
+                                     style="width: 96px; height: 96px; border-radius: 10px; object-fit: cover; border: 2px solid var(--gold);">
+                                <div style="position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 5px; font-size: 0.65rem; color: #fff;">Change</div>
+                            </div>
+                        </div>
+                        <div style="flex: 1; min-width: 180px;">
+                            <input type="file" x-ref="photoInput" accept="image/*" style="display: none;"
+                                   @change="onPhotoChosen($event)" :disabled="generating">
+                            <button type="button" class="btn"
+                                    style="padding: 8px 16px; font-size: 0.82rem; margin-bottom: 8px;"
+                                    @click="$refs.photoInput.click()"
+                                    :disabled="generating">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                Choose Photo
+                            </button>
+                            <div style="font-size: 0.78rem; color: var(--text-subtle); line-height: 1.5;">
+                                A clear photo of your face works best.<br>
+                                JPG, PNG, WEBP — max 15 MB.
+                            </div>
+                            <div x-show="photoFile" x-transition style="margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);" x-text="photoFile ? photoFile.name : ''"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scene prompt -->
+                <div class="form-group">
+                    <label class="form-label">Scene Description</label>
+                    <textarea
+                        x-model="prompt"
+                        placeholder="standing on a sunny beach giving a thumbs up"
+                        :disabled="generating"
+                        style="min-height: 80px; font-size: 0.95rem; resize: vertical;"></textarea>
+                    <div style="font-size: 0.78rem; color: var(--text-subtle); margin-top: 4px;">
+                        Describe where you are and what you're doing — be specific for best results.
+                    </div>
+                </div>
+
+                <!-- Error notice -->
+                <div x-show="errorMsg" x-transition
+                     style="background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; align-items: flex-start; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" style="flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <span style="font-size: 0.82rem; color: var(--danger);" x-text="errorMsg"></span>
+                </div>
+
+                <!-- Generate button -->
+                <div style="display: flex; justify-content: flex-end;">
+                    <button class="btn btn-primary"
+                            :disabled="!canGenerate"
+                            @click="generate()"
+                            style="padding: 10px 24px; font-weight: 600;">
+                        <template x-if="!generating">
+                            <span class="flex items-center gap-2">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                Generate
+                            </span>
+                        </template>
+                        <template x-if="generating">
+                            <span class="flex items-center gap-2">
+                                <span class="spinner spinner-sm"></span>
+                                Generating...
+                            </span>
+                        </template>
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Pipeline X-Ray Log -->
+        <div class="card" x-show="sseLog.length > 0" x-transition>
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                    Pipeline X-Ray
+                </h3>
+                <span style="color: var(--text-subtle); font-size: 0.75rem;" x-text="sseLog.length + ' events'"></span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+                <div x-ref="sseLogFeed" style="max-height: 320px; overflow-y: auto; padding: 12px 16px; font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; font-size: 0.8rem; line-height: 1.8;">
+                    <template x-for="(entry, i) in sseLog" :key="i">
+                        <div style="display: flex; gap: 8px; align-items: baseline;">
+                            <span style="color: var(--gold); white-space: nowrap;" x-text="entry.stage ? '[' + entry.stage + ']' : '[system]'"></span>
+                            <span style="color: var(--text-muted);" x-text="entry.message || entry.status || JSON.stringify(entry)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result: Image -->
+        <div class="card" x-show="imageUrl" x-transition>
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    Generated Image
+                </h3>
+            </div>
+            <div class="card-body" style="text-align: center;">
+                <img :src="imageUrl" alt="Generated avatar image"
+                     style="max-width: 100%; max-height: 480px; border-radius: 10px; border: 1px solid var(--border);">
+                <div style="margin-top: 10px;">
+                    <a :href="imageUrl" target="_blank" download
+                       style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--gold); text-decoration: none; font-weight: 600;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download Image
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result: Video -->
+        <div class="card" x-show="videoUrl" x-transition>
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" style="display: inline; vertical-align: middle; margin-right: 6px;"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                    Generated Video
+                </h3>
+            </div>
+            <div class="card-body" style="text-align: center;">
+                <video :src="videoUrl" controls
+                       style="max-width: 100%; max-height: 480px; border-radius: 10px; border: 1px solid var(--border);"></video>
+                <div style="margin-top: 10px;">
+                    <a :href="videoUrl" target="_blank" download
+                       style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--gold); text-decoration: none; font-weight: 600;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download Video
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function avatarApp() {
+    return {
+        photoFile: null,
+        photoPreview: null,
+        prompt: '',
+        generating: false,
+        sseLog: [],
+        imageUrl: null,
+        videoUrl: null,
+        errorMsg: null,
+        photoUrl: null,   // returned by upload endpoint
+
+        get canGenerate() {
+            return !this.generating && this.photoFile !== null && this.prompt.trim().length > 0;
+        },
+
+        onPhotoChosen(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (file.size > 15 * 1024 * 1024) {
+                this.errorMsg = 'Photo is too large (max 15 MB). Please choose a smaller image.';
+                return;
+            }
+            this.errorMsg = null;
+            this.photoFile = file;
+            this.photoPreview = URL.createObjectURL(file);
+            // Reset prior results
+            this.photoUrl = null;
+            this.imageUrl = null;
+            this.videoUrl = null;
+        },
+
+        async generate() {
+            if (!this.canGenerate) return;
+
+            this.generating = true;
+            this.sseLog = [];
+            this.imageUrl = null;
+            this.videoUrl = null;
+            this.errorMsg = null;
+            this.photoUrl = '';
+
+            try {
+                // Step 1: Upload photo
+                const formData = new FormData();
+                formData.append('photo', this.photoFile);
+
+                const uploadResp = await fetch('/content/api/avatar/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadBody = await uploadResp.json();
+
+                if (!uploadResp.ok) {
+                    if (uploadBody.needs_r2) {
+                        this.errorMsg = 'Cloudflare R2 is not configured. Add your R2 keys in Settings to use this feature.';
+                    } else {
+                        this.errorMsg = uploadBody.error || 'Upload failed (status ' + uploadResp.status + ')';
+                    }
+                    this.generating = false;
+                    return;
+                }
+
+                this.photoUrl = uploadBody.photo_url;
+
+                // Step 2: Stream the generate pipeline
+                const genResp = await fetch('/content/api/avatar/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        photo_url: this.photoUrl,
+                        prompt: this.prompt.trim()
+                    })
+                });
+
+                if (!genResp.ok) {
+                    // Plain JSON error (not SSE)
+                    let errBody;
+                    try { errBody = await genResp.json(); } catch (e) { errBody = {}; }
+                    this.errorMsg = errBody.error || 'Generation failed (status ' + genResp.status + ')';
+                    this.generating = false;
+                    return;
+                }
+
+                // Read SSE stream — same reader pattern as create.html
+                const reader = genResp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep incomplete line in buffer
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const event = JSON.parse(line.slice(6));
+                                this.sseLog.push(event);
+
+                                // Show image whenever detail.image_url arrives
+                                if (event.detail && event.detail.image_url) {
+                                    this.imageUrl = event.detail.image_url;
+                                }
+
+                                // Show video whenever detail.video_url arrives
+                                if (event.detail && event.detail.video_url) {
+                                    this.videoUrl = event.detail.video_url;
+                                }
+
+                                // Handle pipeline error — show message, preserve image if present
+                                if (event.stage === 'pipeline' && event.status === 'error') {
+                                    this.errorMsg = event.message || 'Pipeline encountered an error.';
+                                    if (event.detail && event.detail.image_url) {
+                                        this.imageUrl = event.detail.image_url;
+                                    }
+                                }
+
+                                // Final done event — stop spinner
+                                if (event.stage === 'done') {
+                                    this.generating = false;
+                                }
+                            } catch (e) {
+                                // Skip malformed JSON
+                            }
+                        }
+                    }
+
+                    // Auto-scroll log
+                    this.$nextTick(() => {
+                        const feed = this.$refs.sseLogFeed;
+                        if (feed) feed.scrollTop = feed.scrollHeight;
+                    });
+                }
+
+                // Stream ended without explicit done event
+                if (this.generating) {
+                    this.generating = false;
+                }
+
+            } catch (err) {
+                this.generating = false;
+                this.errorMsg = 'Request failed: ' + err.message;
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

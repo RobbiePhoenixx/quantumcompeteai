@@ -46,6 +46,35 @@ def _get_public_url(key):
     return f"{public_url}/{key}"
 
 
+def _download_media(url, emit_event=None):
+    """Download bytes from a URL, resilient to flaky TLS on Kie's temp host.
+
+    Kie serves generated media from a temporary host (e.g. tempfile.aiquickdraw.com)
+    that intermittently fails the TLS handshake with "[SSL: BAD_SIGNATURE]". That's
+    a certificate-VALIDATION failure — the bytes themselves are fine. So on an
+    SSLError we retry once with verification disabled (scoped to this single
+    request), which lets us still grab the file and re-host it permanently to R2.
+
+    Returns: (content_bytes, content_type)
+    """
+    try:
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        return response.content, response.headers.get("Content-Type")
+    except requests.exceptions.SSLError:
+        if emit_event:
+            emit_event("r2_upload", "progress",
+                       "Source TLS handshake flaked (BAD_SIGNATURE) — retrying the "
+                       "download without cert verification so we can still re-host it.")
+        import warnings
+        from urllib3.exceptions import InsecureRequestWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", InsecureRequestWarning)
+            response = requests.get(url, timeout=60, verify=False)
+            response.raise_for_status()
+            return response.content, response.headers.get("Content-Type")
+
+
 def upload_image(image_url, emit_event=None):
     """
     Upload an image to R2 storage.
@@ -58,11 +87,9 @@ def upload_image(image_url, emit_event=None):
     if emit_event:
         emit_event("r2_upload", "started", "Downloading image for R2 upload...")
 
-    response = requests.get(image_url)
-    response.raise_for_status()
-    data = response.content
+    data, ctype = _download_media(image_url, emit_event=emit_event)
 
-    content_type = response.headers.get("Content-Type", "image/jpeg")
+    content_type = ctype or "image/jpeg"
     ext = mimetypes.guess_extension(content_type) or ".jpg"
     key = f"images/{uuid.uuid4().hex}{ext}"
 
@@ -95,11 +122,9 @@ def upload_video(video_url, emit_event=None):
     if emit_event:
         emit_event("r2_upload", "started", "Downloading video for R2 upload...")
 
-    response = requests.get(video_url)
-    response.raise_for_status()
-    data = response.content
+    data, ctype = _download_media(video_url, emit_event=emit_event)
 
-    content_type = response.headers.get("Content-Type", "video/mp4")
+    content_type = ctype or "video/mp4"
     ext = mimetypes.guess_extension(content_type) or ".mp4"
     key = f"videos/{uuid.uuid4().hex}{ext}"
 
