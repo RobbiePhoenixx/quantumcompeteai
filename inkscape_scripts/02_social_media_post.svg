@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Instagram/TikTok post — 1080x1920 (9:16 vertical) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <title>Social Media Post Template</title>
+
+  <!-- Dark background -->
+  <rect width="1080" height="1920" fill="#17181C"/>
+
+  <!-- Gold gradient overlay at bottom -->
+  <defs>
+    <linearGradient id="fadeUp" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%"   stop-color="#C7A35A" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#17181C" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="700" y="1220" fill="url(#fadeUp)"/>
+
+  <!-- Top brand bar -->
+  <rect width="1080" height="6" y="0" fill="#C7A35A"/>
+
+  <!-- Brand name top -->
+  <text x="540" y="80"
+        font-family="Arial, sans-serif"
+        font-size="28"
+        fill="#C7A35A"
+        text-anchor="middle"
+        letter-spacing="6">QUANTUM COMPETE AI</text>
+
+  <!-- Main headline — EDIT THIS -->
+  <text x="540" y="960"
+        font-family="Georgia, serif"
+        font-size="96"
+        font-weight="bold"
+        fill="#FFFFFF"
+        text-anchor="middle">YOUR</text>
+
+  <text x="540" y="1080"
+        font-family="Georgia, serif"
+        font-size="96"
+        font-weight="bold"
+        fill="#C7A35A"
+        text-anchor="middle">HEADLINE</text>
+
+  <text x="540" y="1200"
+        font-family="Georgia, serif"
+        font-size="96"
+        font-weight="bold"
+        fill="#FFFFFF"
+        text-anchor="middle">HERE</text>
+
+  <!-- Subtext -->
+  <text x="540" y="1380"
+        font-family="Arial, sans-serif"
+        font-size="40"
+        fill="#AAAAAA"
+        text-anchor="middle">Supporting message or CTA</text>
+
+  <!-- Divider line -->
+  <line x1="200" y1="1440" x2="880" y2="1440" stroke="#C7A35A" stroke-width="1" opacity="0.5"/>
+
+  <!-- Bottom call to action -->
+  <text x="540" y="1520"
+        font-family="Arial, sans-serif"
+        font-size="36"
+        fill="#C7A35A"
+        text-anchor="middle"
+        letter-spacing="2">@quantumcompeteai</text>
+
+  <!-- Bottom brand bar -->
+  <rect width="1080" height="6" y="1914" fill="#C7A35A"/>
+</svg>

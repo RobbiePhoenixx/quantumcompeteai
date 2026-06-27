@@ -54,3 +54,8 @@ def thank_you():
 @public_bp.route("/sales")
 def sales():
     return render_template("public/sales.html")
+
+
+@public_bp.route("/win-factor")
+def win_factor():
+    return render_template("public/win-factor.html")

@@ -117,6 +117,9 @@ def create_app():
         from blueprints.email import email_bp
         app.register_blueprint(email_bp, url_prefix="/email")
 
+    from blueprints.crm_tracking import crm_tracking_bp
+    app.register_blueprint(crm_tracking_bp)
+
     # --- Context processor ---
     @app.context_processor
     def inject_globals():

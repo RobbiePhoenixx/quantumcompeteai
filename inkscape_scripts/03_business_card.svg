@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Business Card — standard 3.5" x 2" at 96dpi = 336x192px (scale up for print) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1050" height="600" viewBox="0 0 1050 600">
+  <title>Business Card</title>
+
+  <!-- Card background -->
+  <rect width="1050" height="600" rx="20" fill="#17181C"/>
+
+  <!-- Gold border -->
+  <rect width="1046" height="596" x="2" y="2" rx="18"
+        fill="none" stroke="#C7A35A" stroke-width="3"/>
+
+  <!-- Left gold accent bar -->
+  <rect x="60" y="80" width="4" height="440" fill="#C7A35A"/>
+
+  <!-- Name -->
+  <text x="100" y="180"
+        font-family="Georgia, serif"
+        font-size="64"
+        font-weight="bold"
+        fill="#FFFFFF">Robbie</text>
+
+  <text x="100" y="255"
+        font-family="Georgia, serif"
+        font-size="64"
+        font-weight="bold"
+        fill="#C7A35A">"Phoenixx"</text>
+
+  <text x="100" y="330"
+        font-family="Georgia, serif"
+        font-size="64"
+        font-weight="bold"
+        fill="#FFFFFF">Zeas</text>
+
+  <!-- Title -->
+  <text x="100" y="390"
+        font-family="Arial, sans-serif"
+        font-size="28"
+        fill="#888888"
+        letter-spacing="3">FOUNDER · QUANTUM COMPETE AI</text>
+
+  <!-- Divider -->
+  <line x1="100" y1="420" x2="700" y2="420" stroke="#C7A35A" stroke-width="1" opacity="0.4"/>
+
+  <!-- Contact info -->
+  <text x="100" y="468"
+        font-family="Arial, sans-serif"
+        font-size="26"
+        fill="#AAAAAA">robbie@landagencypartners.com</text>
+
+  <text x="100" y="510"
+        font-family="Arial, sans-serif"
+        font-size="26"
+        fill="#AAAAAA">quantumcompeteai.com</text>
+</svg>

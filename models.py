@@ -486,6 +486,35 @@ class Setting(db.Model):
 
 
 # ---------------------------------------------------------------------------
+# Email Tracking Model (Quantum Compete AI — IMI Campaign)
+# ---------------------------------------------------------------------------
+
+class EmailEvent(db.Model):
+    """Tracks every prospect interaction with outbound emails."""
+    __tablename__ = "email_events"
+
+    id          = db.Column(db.Integer, primary_key=True)
+    prospect_id = db.Column(db.String(120), nullable=False, index=True)
+    campaign_id = db.Column(db.String(120), nullable=False, index=True)
+    event_type  = db.Column(db.String(50),  nullable=False)   # open | read | book | click
+    destination = db.Column(db.Text, nullable=True)
+    ip_address  = db.Column(db.String(60),  nullable=True)
+    user_agent  = db.Column(db.Text, nullable=True)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id":           self.id,
+            "prospect_id":  self.prospect_id,
+            "campaign_id":  self.campaign_id,
+            "event_type":   self.event_type,
+            "destination":  self.destination,
+            "ip_address":   self.ip_address,
+            "created_at":   self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Helper function
 # ---------------------------------------------------------------------------
 
